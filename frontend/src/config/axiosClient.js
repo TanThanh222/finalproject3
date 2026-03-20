@@ -1,7 +1,12 @@
 import axios from "axios";
 
 const axiosClient = axios.create({
-  baseURL: import.meta.env.VITE_API_URL,
+  baseURL: `${import.meta.env.VITE_API_URL || "http://localhost:5000"}/api`,
+  timeout: 10000,
+  headers: {
+    "Content-Type": "application/json",
+  },
+  withCredentials: true,
 });
 
 axiosClient.interceptors.request.use(
@@ -31,14 +36,6 @@ axiosClient.interceptors.response.use(
       if (window.location.pathname !== "/auth") {
         window.location.href = "/auth";
       }
-    }
-
-    if (status === 500) {
-      console.error("Server error:", error?.response?.data);
-    }
-
-    if (!error.response) {
-      console.error("Network error:", error.message);
     }
 
     return Promise.reject(error);
