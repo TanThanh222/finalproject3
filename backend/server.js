@@ -6,7 +6,7 @@ import dotenv from "dotenv";
 import authRoutes from "./routes/authRoutes.js";
 import courseRoutes from "./routes/courseRoutes.js";
 import enrollRoutes from "./routes/enrollRoutes.js";
-import paymentRoutes, { stripeWebhook } from "./routes/paymentRoutes.js";
+import paymentRoutes from "./routes/paymentRoutes.js";
 
 dotenv.config();
 
@@ -17,12 +17,6 @@ app.use(
     origin: process.env.CLIENT_URL || "http://localhost:5173",
     credentials: true,
   }),
-);
-
-app.post(
-  "/api/payments/webhook",
-  express.raw({ type: "application/json" }),
-  stripeWebhook,
 );
 
 app.use(express.json());
@@ -64,6 +58,7 @@ const startServer = async () => {
     });
   } catch (error) {
     console.error("Server start error:", error.message);
+    process.exit(1);
   }
 };
 
