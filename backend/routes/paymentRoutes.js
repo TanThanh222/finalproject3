@@ -3,7 +3,6 @@ import { protect } from "../middleware/authMiddleware.js";
 import {
   createCheckoutSession,
   verifyCheckoutSession,
-  stripeWebhook,
   getMyPayments,
 } from "../controllers/paymentController.js";
 
@@ -14,4 +13,3 @@ router.get("/verify-session", protect, verifyCheckoutSession);
 router.get("/my-payments", protect, getMyPayments);
 
 export default router;
-export { stripeWebhook };

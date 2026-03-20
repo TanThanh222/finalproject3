@@ -32,12 +32,6 @@ export const createCheckoutSession = async (req, res) => {
     const userEmail = req.user?.email;
     const { courseId } = req.body;
 
-    console.log("Stripe key loaded:", !!process.env.STRIPE_SECRET_KEY);
-    console.log(
-      "Stripe key prefix:",
-      process.env.STRIPE_SECRET_KEY?.slice(0, 8),
-    );
-
     if (!userId) {
       return res.status(401).json({
         success: false,
@@ -83,18 +77,6 @@ export const createCheckoutSession = async (req, res) => {
       });
     }
 
-    const payment = await Payment.create({
-      user: userId,
-      course: courseId,
-      amount: price,
-      currency: "usd",
-      provider: "stripe",
-      status: "pending",
-      metadata: {
-        courseTitle: course.title || "",
-      },
-    });
-
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       payment_method_types: ["card"],
@@ -118,7 +100,6 @@ export const createCheckoutSession = async (req, res) => {
         },
       ],
       metadata: {
-        paymentId: String(payment._id),
         courseId: String(course._id),
         userId: String(userId),
       },
@@ -126,9 +107,22 @@ export const createCheckoutSession = async (req, res) => {
       cancel_url: `${getClientUrl()}/checkout/cancel?courseId=${course._id}`,
     });
 
-    payment.checkoutSessionId = session.id;
-    payment.status = "requires_payment";
-    await payment.save();
+    await Payment.create({
+      user: userId,
+      course: courseId,
+      amount: price,
+      currency: "usd",
+      provider: "stripe",
+      checkoutSessionId: session.id,
+      paymentIntentId:
+        typeof session.payment_intent === "string"
+          ? session.payment_intent
+          : null,
+      status: "requires_payment",
+      metadata: {
+        courseTitle: course.title || "",
+      },
+    });
 
     return res.status(200).json({
       success: true,
@@ -187,7 +181,9 @@ export const verifyCheckoutSession = async (req, res) => {
     if (stripeSession.payment_status === "paid") {
       payment.status = "paid";
       payment.paymentIntentId =
-        stripeSession.payment_intent || payment.paymentIntentId;
+        typeof stripeSession.payment_intent === "string"
+          ? stripeSession.payment_intent
+          : payment.paymentIntentId;
       payment.paidAt = payment.paidAt || new Date();
       await payment.save();
 
@@ -211,6 +207,12 @@ export const verifyCheckoutSession = async (req, res) => {
       );
 
       await syncCourseStudents(payment.course._id);
+    } else if (
+      stripeSession.status === "expired" ||
+      stripeSession.payment_status === "unpaid"
+    ) {
+      payment.status = "cancelled";
+      await payment.save();
     }
 
     return res.status(200).json({
@@ -218,7 +220,7 @@ export const verifyCheckoutSession = async (req, res) => {
       paymentStatus: payment.status,
       course: {
         ...payment.course.toObject(),
-        isOwned: true,
+        isOwned: payment.status === "paid",
       },
     });
   } catch (error) {
@@ -227,102 +229,6 @@ export const verifyCheckoutSession = async (req, res) => {
       success: false,
       message: "Failed to verify payment",
       error: error.message,
-    });
-  }
-};
-
-export const stripeWebhook = async (req, res) => {
-  if (!process.env.STRIPE_WEBHOOK_SECRET) {
-    return res.status(200).json({
-      received: true,
-      message: "Webhook secret is not configured. Webhook skipped.",
-    });
-  }
-
-  const signature = req.headers["stripe-signature"];
-  let event;
-
-  try {
-    event = stripe.webhooks.constructEvent(
-      req.body,
-      signature,
-      process.env.STRIPE_WEBHOOK_SECRET,
-    );
-  } catch (error) {
-    console.error("stripe webhook signature error:", error.message);
-    return res.status(400).send(`Webhook Error: ${error.message}`);
-  }
-
-  try {
-    switch (event.type) {
-      case "checkout.session.completed": {
-        const session = event.data.object;
-
-        const payment = await Payment.findOne({
-          checkoutSessionId: session.id,
-        });
-
-        if (payment) {
-          payment.status = "paid";
-          payment.paymentIntentId =
-            session.payment_intent || payment.paymentIntentId;
-          payment.paidAt = payment.paidAt || new Date();
-          await payment.save();
-
-          await Enroll.findOneAndUpdate(
-            {
-              user: payment.user,
-              course: payment.course,
-            },
-            {
-              user: payment.user,
-              course: payment.course,
-              payment: payment._id,
-              status: "active",
-              enrolledAt: new Date(),
-            },
-            {
-              upsert: true,
-              new: true,
-              setDefaultsOnInsert: true,
-            },
-          );
-
-          await syncCourseStudents(payment.course);
-        }
-        break;
-      }
-
-      case "checkout.session.expired": {
-        const session = event.data.object;
-
-        await Payment.findOneAndUpdate(
-          { checkoutSessionId: session.id },
-          { status: "cancelled" },
-        );
-        break;
-      }
-
-      case "payment_intent.payment_failed": {
-        const paymentIntent = event.data.object;
-
-        await Payment.findOneAndUpdate(
-          { paymentIntentId: paymentIntent.id },
-          { status: "failed" },
-        );
-        break;
-      }
-
-      default:
-        break;
-    }
-
-    return res.status(200).json({ received: true });
-  } catch (error) {
-    console.error("stripeWebhook error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Webhook handling failed",
     });
   }
 };

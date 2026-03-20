@@ -32,11 +32,11 @@ const paymentSchema = new mongoose.Schema(
     },
     checkoutSessionId: {
       type: String,
-      default: "",
+      default: null,
     },
     paymentIntentId: {
       type: String,
-      default: "",
+      default: null,
     },
     status: {
       type: String,
